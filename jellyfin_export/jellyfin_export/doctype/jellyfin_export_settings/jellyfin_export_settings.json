@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-12-18 21:34:12.542580",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "export_root",
+  "link_mode",
+  "include_images",
+  "queue",
+  "libraries"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "export_root",
+   "fieldtype": "Data",
+   "label": "Export Root"
+  },
+  {
+   "default": "hardlink",
+   "fieldname": "link_mode",
+   "fieldtype": "Select",
+   "label": "Link Mode",
+   "options": "hardlink\ncopy\nsymlink"
+  },
+  {
+   "default": "0",
+   "fieldname": "include_images",
+   "fieldtype": "Check",
+   "label": "Include Images (posters/images)"
+  },
+  {
+   "fieldname": "queue",
+   "fieldtype": "Select",
+   "label": "Queue",
+   "options": "long\ndefault"
+  },
+  {
+   "fieldname": "libraries",
+   "fieldtype": "Table",
+   "label": "Libraries",
+   "options": "Jellyfin Export Library"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-12-18 23:33:47.138210",
+ "modified_by": "Administrator",
+ "module": "Jellyfin Export",
+ "name": "Jellyfin Export Settings",
+ "owner": "afarran1992@gmail.com",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

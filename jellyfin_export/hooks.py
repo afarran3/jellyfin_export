@@ -5,6 +5,23 @@ app_description = "Jellyfin Export"
 app_email = "afarran1992@gmail.com"
 app_license = "mit"
 
+
+doc_events = {
+    "Drive Entity": {
+        "after_insert": "jellyfin_export.sync.on_drive_entity_change",
+        "on_update": "jellyfin_export.sync.on_drive_entity_change",
+        "on_trash": "jellyfin_export.sync.on_drive_entity_trash",
+    }
+}
+
+scheduler_events = {
+    # Safety net: catches missed jobs or transient failures.
+    "daily": [
+        "jellyfin_export.api.nightly_resync",
+    ]
+}
+
+
 # Apps
 # ------------------
 

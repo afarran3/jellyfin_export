@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-12-18 21:50:09.194831",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "drive_entity",
+  "library_name",
+  "src_path",
+  "export_path",
+  "export_type",
+  "status",
+  "last_exported_on",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "drive_entity",
+   "fieldtype": "Link",
+   "label": "Drive Entity",
+   "options": "Drive Entity",
+   "unique": 1
+  },
+  {
+   "fieldname": "library_name",
+   "fieldtype": "Data",
+   "label": "Library Name"
+  },
+  {
+   "fieldname": "src_path",
+   "fieldtype": "Text",
+   "label": "Source Path"
+  },
+  {
+   "fieldname": "export_path",
+   "fieldtype": "Text",
+   "label": "Export Path"
+  },
+  {
+   "fieldname": "export_type",
+   "fieldtype": "Select",
+   "label": "Export Type",
+   "options": "file\nfolder"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "exported\ndeleted\nskipped\nerror"
+  },
+  {
+   "fieldname": "last_exported_on",
+   "fieldtype": "Datetime",
+   "label": "Last Exported On"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Long Text",
+   "label": "Last Error"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-12-18 22:34:49.400865",
+ "modified_by": "Administrator",
+ "module": "Jellyfin Export",
+ "name": "Jellyfin Export Map",
+ "owner": "afarran1992@gmail.com",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
