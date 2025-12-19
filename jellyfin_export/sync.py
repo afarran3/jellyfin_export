@@ -1,6 +1,7 @@
 from __future__ import annotations
 import frappe
 from frappe.utils.background_jobs import enqueue
+from frappe.utils.redis_wrapper import RedisWrapper
 
 
 from jellyfin_export.utils import get_settings, parse_allowed_exts, diagnose_and_heal_tree
