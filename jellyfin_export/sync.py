@@ -1,9 +1,9 @@
 from __future__ import annotations
 import frappe
 from frappe.utils.background_jobs import enqueue
-from frappe.utils.redis_wrapper import RedisWrapper
 
-from jellyfin_export.utils import get_settings, parse_allowed_exts
+
+from jellyfin_export.utils import get_settings, parse_allowed_exts, diagnose_and_heal_tree
 from jellyfin_export.exporter import export_entity, export_subtree, remove_export
 
 def _redis_lock(key: str, timeout: int = 300):
@@ -80,7 +80,12 @@ def run_delete_job(entity_name: str):
     with _redis_lock(key, timeout=300):
         remove_export(entity_name)
 
+
+
 def run_export_job(entity_name: str, library_name: str, root_entity: str, export_subdir: str):
+    # Self-heal tree if needed
+    diagnose_and_heal_tree(root_entity)
+
     settings = get_settings()
     export_root = settings.export_root
     link_mode = settings.link_mode or "hardlink"

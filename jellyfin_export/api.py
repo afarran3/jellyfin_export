@@ -1,7 +1,7 @@
 from __future__ import annotations
 import frappe
 from frappe.utils.background_jobs import enqueue
-from jellyfin_export.utils import get_settings
+from jellyfin_export.utils import get_settings, diagnose_and_heal_tree
 
 @frappe.whitelist()
 def sync_all():
@@ -55,6 +55,9 @@ def _sync_library_job(library_name: str, root_entity: str, export_subdir: str):
         if row.library_name == library_name:
             allowed = parse_allowed_exts(row.allowed_extensions)
             break
+
+    # Self-heal check
+    diagnose_and_heal_tree(root_entity)
 
     export_subtree(
         root_entity=root_entity,
