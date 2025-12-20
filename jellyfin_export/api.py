@@ -43,7 +43,7 @@ def sync_library(library_name: str):
     return "Queued"
 
 def _sync_library_job(library_name: str, root_entity: str, export_subdir: str):
-    from jellyfin_export.exporter import export_subtree
+    from jellyfin_export.exporter import export_subtree, cleanup_invalid_exports
     from jellyfin_export.utils import parse_allowed_exts
 
     settings = get_settings()
@@ -55,6 +55,9 @@ def _sync_library_job(library_name: str, root_entity: str, export_subdir: str):
         if row.library_name == library_name:
             allowed = parse_allowed_exts(row.allowed_extensions)
             break
+
+    # Cleanup phase: remove any exports for invalid entities
+    cleanup_invalid_exports(library_name)
 
     # Self-heal check
     diagnose_and_heal_tree(root_entity)

@@ -43,6 +43,19 @@ def on_drive_entity_change(doc, method=None):
     if int(settings.enabled or 0) != 1:
         return
 
+    # Handle soft deletion (Empty Trash)
+    # When emptied from trash: is_active -> -1, path -> None
+    if str(doc.is_active) == "-1":
+        queue = settings.queue or "long"
+        enqueue(
+            "jellyfin_export.sync.run_delete_job",
+            queue=queue,
+            timeout=60 * 10,
+            enqueue_after_commit=True,
+            entity_name=doc.name,
+        )
+        return
+
     info = _get_library_for_entity(doc.name)
     if not info:
         return

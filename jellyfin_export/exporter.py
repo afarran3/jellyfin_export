@@ -11,10 +11,11 @@ from jellyfin_export.utils import (
 def _get_entity(entity_name: str):
     return frappe.get_doc("Drive Entity", entity_name)
 
-def _build_rel_parts(entity_name: str, stop_at: str) -> list[str]:
+def _build_rel_parts(entity_name: str, stop_at: str) -> list[str] | None:
     """
     Build path parts using Drive hierarchy (title + parent_drive_entity),
     stopping at stop_at (library root entity).
+    Returns None if any ancestor is invalid (deleted/trashed).
     """
     parts: list[str] = []
     cur = entity_name
@@ -23,6 +24,11 @@ def _build_rel_parts(entity_name: str, stop_at: str) -> list[str]:
     while cur and cur not in seen:
         seen.add(cur)
         doc = _get_entity(cur)
+        
+        # Validation: If ancestor is invalid, the whole path is invalid
+        if not doc or doc.is_active != 1 or doc.trashed_on:
+            return None
+            
         if doc.name == stop_at:
             break
         parts.append(safe_name(doc.title))
@@ -131,12 +137,8 @@ def _remove_path_safely(p: str):
         if os.path.islink(p) or os.path.isfile(p):
             os.unlink(p)
         elif os.path.isdir(p):
-            # remove only if empty
-            try:
-                os.rmdir(p)
-            except OSError:
-                pass
-    except FileNotFoundError:
+            shutil.rmtree(p, ignore_errors=True)
+    except Exception:
         pass
 
 # def export_entity(entity_name: str, library_name: str, library_root_entity: str, export_root: str,
@@ -207,6 +209,13 @@ def export_entity(entity_name: str, library_name: str, library_root_entity: str,
     # Folder
     if int(ent.is_group or 0) == 1:
         rel_parts = _build_rel_parts(ent.name, stop_at=library_root_entity)
+        if rel_parts is None:
+             m = _get_map(ent.name)
+             if m and m.get("export_path"):
+                 _remove_path_safely(m["export_path"])
+             _upsert_map(ent.name, library_name, src="", dst="", export_type="folder", status="skipped", err="Invalid Ancestor")
+             return
+
         folder_dst = os.path.join(export_base, *rel_parts) if rel_parts else export_base
         ensure_dir(folder_dst)
 
@@ -235,6 +244,14 @@ def export_entity(entity_name: str, library_name: str, library_root_entity: str,
         return
 
     rel_parts = _build_rel_parts(ent.name, stop_at=library_root_entity)
+    if rel_parts is None:
+        # Invalid ancestor - cleanup if it was exported
+        m = _get_map(ent.name)
+        if m and m.get("export_path"):
+            _remove_path_safely(m["export_path"])
+        _upsert_map(ent.name, library_name, src=src, dst="", export_type="file", status="skipped", err="Invalid Ancestor")
+        return
+
     if not rel_parts:
         rel_parts = [safe_name(ent.title)]
 
@@ -294,26 +311,66 @@ def export_subtree(root_entity: str, library_name: str, library_root_entity: str
 
 def remove_export(entity_name: str):
     """
-    Remove exported file/folder ONLY (never touch source).
+    Remove exported file/folder (recursively if folder) and update Map status.
     """
     m = frappe.db.get_value("Jellyfin Export Map", {"drive_entity": entity_name}, ["name", "export_path"], as_dict=True)
     if not m:
         return
+
+    # 1. Physical Removal
     dst = (m.export_path or "").strip()
     if dst:
-        try:
-            if os.path.islink(dst) or os.path.isfile(dst):
-                os.unlink(dst)
-            elif os.path.isdir(dst):
-                # Remove empty dirs only (don’t nuke recursively)
-                try:
-                    os.rmdir(dst)
-                except OSError:
-                    pass
-        except FileNotFoundError:
-            pass
+        _remove_path_safely(dst)
 
-    doc = frappe.get_doc("Jellyfin Export Map", m.name)
-    doc.status = "deleted"
-    doc.last_exported_on = frappe.utils.now_datetime()
-    doc.save(ignore_permissions=True)
+    # 2. Update Status (Self)
+    frappe.db.set_value("Jellyfin Export Map", m.name, "status", "deleted")
+    frappe.db.set_value("Jellyfin Export Map", m.name, "last_exported_on", frappe.utils.now_datetime())
+
+    # 3. Recursive Update (if folder)
+    # We try to use lft/rgt to find descendants to mark them as deleted too
+    ent = frappe.db.get_value("Drive Entity", entity_name, ["lft", "rgt", "is_group"], as_dict=True)
+    if ent and ent.is_group and ent.lft and ent.rgt:
+        descendants = frappe.get_all("Drive Entity", filters={
+            "lft": [">", ent.lft],
+            "rgt": ["<", ent.rgt]
+        }, pluck="name")
+        
+        if descendants:
+            frappe.db.sql("""
+                UPDATE `tabJellyfin Export Map`
+                SET status='deleted', last_exported_on=NOW()
+                WHERE drive_entity IN %(descendants)s
+            """, {"descendants": descendants})
+
+def cleanup_invalid_exports(library_name: str):
+    """
+    Find exported items in this library where the source Drive Entity is invalid
+    (deleted, trashed, or soft-deleted is_active != 1) and remove them.
+    Also cleans up 'zombie' exports: items marked deleted in DB but physically present.
+    """
+    # Find all maps for this library (even deleted ones)
+    invalid_maps = frappe.db.sql("""
+        SELECT m.drive_entity, m.status, m.export_path
+        FROM `tabJellyfin Export Map` m
+        LEFT JOIN `tabDrive Entity` de ON m.drive_entity = de.name
+        WHERE m.library_name = %(library_name)s
+          AND (
+              de.name IS NULL            -- Entity physically missing
+              OR de.is_active != 1       -- Soft deleted
+              OR de.trashed_on IS NOT NULL -- Trashed
+          )
+    """, {"library_name": library_name}, as_dict=True)
+
+    for row in invalid_maps:
+        should_remove = False
+        
+        # Case 1: Active record in Map (status != deleted), but Entity is invalid -> Remove
+        if row.status != "deleted":
+            should_remove = True
+            
+        # Case 2: Zombie record (status == deleted), but File exists -> Remove
+        elif row.export_path and os.path.lexists(row.export_path):
+            should_remove = True
+            
+        if should_remove:
+            remove_export(row.drive_entity)
