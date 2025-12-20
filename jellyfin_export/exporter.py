@@ -8,7 +8,51 @@ from jellyfin_export.utils import (
     safe_name, ensure_dir, same_filesystem, split_ext, parse_allowed_exts
 )
 
+# Optimization: In-memory cache for path building to avoid N*Depth DB queries
+# Format: { name: { title: str, parent: str, is_active: int, trashed_on: datetime } }
+PATH_CACHE = {}
+
+def build_path_cache(root_entity: str):
+    """
+    Pre-fetch all descendants of root_entity into PATH_CACHE.
+    """
+    global PATH_CACHE
+    PATH_CACHE.clear()
+    
+    root = frappe.get_doc("Drive Entity", root_entity)
+    if not root:
+        return
+        
+    # Add root itself
+    PATH_CACHE[root.name] = {
+        "title": root.title,
+        "parent_drive_entity": root.parent_drive_entity,
+        "is_active": root.is_active,
+        "trashed_on": root.trashed_on,
+        "name": root.name
+    }
+
+    # Fetch all descendants efficiently
+    if root.lft and root.rgt:
+        rows = frappe.get_all("Drive Entity", filters={
+            "lft": [">", root.lft],
+            "rgt": ["<", root.rgt]
+        }, fields=["name", "title", "parent_drive_entity", "is_active", "trashed_on"])
+        
+        for r in rows:
+            PATH_CACHE[r.name] = r
+
+def _get_entity_info(entity_name: str):
+    """
+    Get dict info from cache if available, else fetch doc (slow fallback).
+    """
+    if entity_name in PATH_CACHE:
+        return PATH_CACHE[entity_name]
+    return frappe.get_doc("Drive Entity", entity_name)
+
 def _get_entity(entity_name: str):
+    # Deprecated for path building, use _get_entity_info where possible.
+    # Kept for helpers that need full doc object.
     return frappe.get_doc("Drive Entity", entity_name)
 
 def _build_rel_parts(entity_name: str, stop_at: str) -> list[str] | None:
@@ -23,16 +67,32 @@ def _build_rel_parts(entity_name: str, stop_at: str) -> list[str] | None:
 
     while cur and cur not in seen:
         seen.add(cur)
-        doc = _get_entity(cur)
         
-        # Validation: If ancestor is invalid, the whole path is invalid
-        if not doc or doc.is_active != 1 or doc.trashed_on:
-            return None
+        # Optimize: Use cache if available
+        # info is either a dict (from cache) or a Document/SimpleNamespace (from get_doc fallback)
+        info = _get_entity_info(cur)
+        
+        # Normalize access between dict and object
+        def get_val(obj, key):
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
             
-        if doc.name == stop_at:
+        # Validation: If ancestor is invalid, the whole path is invalid
+        is_active = get_val(info, "is_active")
+        trashed_on = get_val(info, "trashed_on")
+        title = get_val(info, "title")
+        name = get_val(info, "name")
+        parent = get_val(info, "parent_drive_entity")
+        
+        if not info or (isinstance(is_active, int) and is_active != 1) or trashed_on:
+             return None
+
+        if name == stop_at:
             break
-        parts.append(safe_name(doc.title))
-        cur = doc.parent_drive_entity
+            
+        parts.append(safe_name(title))
+        cur = parent
 
     return list(reversed(parts))
 
@@ -294,20 +354,28 @@ def export_entity(entity_name: str, library_name: str, library_root_entity: str,
 
 def export_subtree(root_entity: str, library_name: str, library_root_entity: str, export_root: str,
                    export_subdir: str, link_mode: str, include_images: bool, allowed_exts: set[str] | None):
-    # Ensure the folder itself exists in export view
-    export_entity(root_entity, library_name, library_root_entity, export_root, export_subdir, link_mode, include_images, allowed_exts)
+    # Optimization: Pre-load path cache
+    build_path_cache(root_entity)
 
-    for row in _iter_descendants(root_entity):
-        export_entity(
-            row["name"],
-            library_name,
-            library_root_entity,
-            export_root,
-            export_subdir,
-            link_mode,
-            include_images,
-            allowed_exts,
-        )
+    try:
+        # Ensure the folder itself exists in export view
+        export_entity(root_entity, library_name, library_root_entity, export_root, export_subdir, link_mode, include_images, allowed_exts)
+
+        for row in _iter_descendants(root_entity):
+            export_entity(
+                row["name"],
+                library_name,
+                library_root_entity,
+                export_root,
+                export_subdir,
+                link_mode,
+                include_images,
+                allowed_exts,
+            )
+    finally:
+        # Cleanup memory
+        global PATH_CACHE
+        PATH_CACHE.clear()
 
 def remove_export(entity_name: str):
     """
