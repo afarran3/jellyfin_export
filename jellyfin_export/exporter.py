@@ -29,7 +29,11 @@ def build_path_cache(root_entity: str):
         "parent_drive_entity": root.parent_drive_entity,
         "is_active": root.is_active,
         "trashed_on": root.trashed_on,
-        "name": root.name
+        "name": root.name,
+        "path": root.path,
+        "is_group": root.is_group,
+        "file_ext": root.file_ext,
+        "mime_type": root.mime_type
     }
 
     # Fetch all descendants efficiently
@@ -37,17 +41,18 @@ def build_path_cache(root_entity: str):
         rows = frappe.get_all("Drive Entity", filters={
             "lft": [">", root.lft],
             "rgt": ["<", root.rgt]
-        }, fields=["name", "title", "parent_drive_entity", "is_active", "trashed_on"])
+        }, fields=["name", "title", "parent_drive_entity", "is_active", "trashed_on", "path", "is_group", "file_ext", "mime_type"])
         
         for r in rows:
             PATH_CACHE[r.name] = r
 
 def _get_entity_info(entity_name: str):
     """
-    Get dict info from cache if available, else fetch doc (slow fallback).
+    Get info from cache if available, wrapped as frappe._dict for dot access.
+    Else fetch doc (slow fallback).
     """
     if entity_name in PATH_CACHE:
-        return PATH_CACHE[entity_name]
+        return frappe._dict(PATH_CACHE[entity_name])
     return frappe.get_doc("Drive Entity", entity_name)
 
 def _get_entity(entity_name: str):
@@ -69,30 +74,18 @@ def _build_rel_parts(entity_name: str, stop_at: str) -> list[str] | None:
         seen.add(cur)
         
         # Optimize: Use cache if available
-        # info is either a dict (from cache) or a Document/SimpleNamespace (from get_doc fallback)
+        # info is either frappe._dict (from cache) or Document (from get_doc fallback)
         info = _get_entity_info(cur)
-        
-        # Normalize access between dict and object
-        def get_val(obj, key):
-            if isinstance(obj, dict):
-                return obj.get(key)
-            return getattr(obj, key, None)
             
         # Validation: If ancestor is invalid, the whole path is invalid
-        is_active = get_val(info, "is_active")
-        trashed_on = get_val(info, "trashed_on")
-        title = get_val(info, "title")
-        name = get_val(info, "name")
-        parent = get_val(info, "parent_drive_entity")
-        
-        if not info or (isinstance(is_active, int) and is_active != 1) or trashed_on:
+        if not info or (isinstance(info.is_active, int) and info.is_active != 1) or info.trashed_on:
              return None
 
-        if name == stop_at:
+        if info.name == stop_at:
             break
             
-        parts.append(safe_name(title))
-        cur = parent
+        parts.append(safe_name(info.title))
+        cur = info.parent_drive_entity
 
     return list(reversed(parts))
 
@@ -257,7 +250,8 @@ def _remove_path_safely(p: str):
 
 def export_entity(entity_name: str, library_name: str, library_root_entity: str, export_root: str,
                   export_subdir: str, link_mode: str, include_images: bool, allowed_exts: set[str] | None):
-    ent = _get_entity(entity_name)
+    # USE CACHED INFO to avoid N queries!
+    ent = _get_entity_info(entity_name)
 
     # Skip inactive/trashed
     if getattr(ent, "trashed_on", None) or getattr(ent, "is_active", 1) != 1:
